@@ -1,0 +1,517 @@
+{
+  "manifest": "seg-agent/1",
+  "name": "totalsegmentator-mr",
+  "title": "TotalSegmentator (MR)",
+  "version": "2.18.0-fast",
+  "summary": "Segments 50 anatomical structures of a whole MR image by itself.",
+  "description": "TotalSegmentator, with its fast model (3 mm): organs, bones, muscles and vessels as one label each. It takes about a minute on a GPU. The labels are a draft to correct, not a result to use as it is.",
+  "author": "Wasserthal et al., University Hospital Basel",
+  "purpose": {
+    "category": "anatomy",
+    "detail": "Every structure of a whole-body MR image."
+  },
+  "mode": "automatic",
+  "accepts": {
+    "image": {
+      "modalities": [
+        "MR"
+      ],
+      "anatomy": [
+        "whole-body"
+      ],
+      "maxVoxels": 268435456
+    }
+  },
+  "returns": {
+    "kind": "labelmap",
+    "labels": [
+      {
+        "value": 1,
+        "name": "Spleen",
+        "color": [
+          67,
+          118,
+          242
+        ]
+      },
+      {
+        "value": 2,
+        "name": "Kidney right",
+        "color": [
+          151,
+          242,
+          24
+        ]
+      },
+      {
+        "value": 3,
+        "name": "Kidney left",
+        "color": [
+          242,
+          109,
+          226
+        ]
+      },
+      {
+        "value": 4,
+        "name": "Gallbladder",
+        "color": [
+          67,
+          242,
+          213
+        ]
+      },
+      {
+        "value": 5,
+        "name": "Liver",
+        "color": [
+          242,
+          142,
+          24
+        ]
+      },
+      {
+        "value": 6,
+        "name": "Stomach",
+        "color": [
+          142,
+          109,
+          242
+        ]
+      },
+      {
+        "value": 7,
+        "name": "Pancreas",
+        "color": [
+          74,
+          242,
+          67
+        ]
+      },
+      {
+        "value": 8,
+        "name": "Adrenal gland right",
+        "color": [
+          242,
+          24,
+          97
+        ]
+      },
+      {
+        "value": 9,
+        "name": "Adrenal gland left",
+        "color": [
+          109,
+          192,
+          242
+        ]
+      },
+      {
+        "value": 10,
+        "name": "Lung left",
+        "color": [
+          228,
+          242,
+          67
+        ]
+      },
+      {
+        "value": 11,
+        "name": "Lung right",
+        "color": [
+          197,
+          24,
+          242
+        ]
+      },
+      {
+        "value": 12,
+        "name": "Esophagus",
+        "color": [
+          109,
+          242,
+          175
+        ]
+      },
+      {
+        "value": 13,
+        "name": "Small bowel",
+        "color": [
+          242,
+          103,
+          67
+        ]
+      },
+      {
+        "value": 14,
+        "name": "Duodenum",
+        "color": [
+          24,
+          43,
+          242
+        ]
+      },
+      {
+        "value": 15,
+        "name": "Colon",
+        "color": [
+          159,
+          242,
+          109
+        ]
+      },
+      {
+        "value": 16,
+        "name": "Urinary bladder",
+        "color": [
+          242,
+          67,
+          184
+        ]
+      },
+      {
+        "value": 17,
+        "name": "Prostate",
+        "color": [
+          24,
+          234,
+          242
+        ]
+      },
+      {
+        "value": 18,
+        "name": "Sacrum",
+        "color": [
+          242,
+          209,
+          109
+        ]
+      },
+      {
+        "value": 19,
+        "name": "Vertebrae",
+        "color": [
+          147,
+          67,
+          242
+        ]
+      },
+      {
+        "value": 20,
+        "name": "Intervertebral discs",
+        "color": [
+          24,
+          242,
+          60
+        ]
+      },
+      {
+        "value": 21,
+        "name": "Spinal cord",
+        "color": [
+          242,
+          109,
+          126
+        ]
+      },
+      {
+        "value": 22,
+        "name": "Heart",
+        "color": [
+          67,
+          140,
+          242
+        ]
+      },
+      {
+        "value": 23,
+        "name": "Aorta",
+        "color": [
+          179,
+          242,
+          24
+        ]
+      },
+      {
+        "value": 24,
+        "name": "Inferior vena cava",
+        "color": [
+          242,
+          109,
+          242
+        ]
+      },
+      {
+        "value": 25,
+        "name": "Portal vein and splenic vein",
+        "color": [
+          67,
+          242,
+          190
+        ]
+      },
+      {
+        "value": 26,
+        "name": "Iliac artery left",
+        "color": [
+          242,
+          114,
+          24
+        ]
+      },
+      {
+        "value": 27,
+        "name": "Iliac artery right",
+        "color": [
+          125,
+          109,
+          242
+        ]
+      },
+      {
+        "value": 28,
+        "name": "Iliac vena left",
+        "color": [
+          97,
+          242,
+          67
+        ]
+      },
+      {
+        "value": 29,
+        "name": "Iliac vena right",
+        "color": [
+          242,
+          24,
+          125
+        ]
+      },
+      {
+        "value": 30,
+        "name": "Humerus left",
+        "color": [
+          109,
+          209,
+          242
+        ]
+      },
+      {
+        "value": 31,
+        "name": "Humerus right",
+        "color": [
+          242,
+          234,
+          67
+        ]
+      },
+      {
+        "value": 32,
+        "name": "Scapula left",
+        "color": [
+          169,
+          24,
+          242
+        ]
+      },
+      {
+        "value": 33,
+        "name": "Scapula right",
+        "color": [
+          109,
+          242,
+          158
+        ]
+      },
+      {
+        "value": 34,
+        "name": "Clavicula left",
+        "color": [
+          242,
+          80,
+          67
+        ]
+      },
+      {
+        "value": 35,
+        "name": "Clavicula right",
+        "color": [
+          24,
+          71,
+          242
+        ]
+      },
+      {
+        "value": 36,
+        "name": "Femur left",
+        "color": [
+          176,
+          242,
+          109
+        ]
+      },
+      {
+        "value": 37,
+        "name": "Femur right",
+        "color": [
+          242,
+          67,
+          207
+        ]
+      },
+      {
+        "value": 38,
+        "name": "Hip left",
+        "color": [
+          24,
+          242,
+          223
+        ]
+      },
+      {
+        "value": 39,
+        "name": "Hip right",
+        "color": [
+          242,
+          192,
+          109
+        ]
+      },
+      {
+        "value": 40,
+        "name": "Gluteus maximus left",
+        "color": [
+          124,
+          67,
+          242
+        ]
+      },
+      {
+        "value": 41,
+        "name": "Gluteus maximus right",
+        "color": [
+          24,
+          242,
+          32
+        ]
+      },
+      {
+        "value": 42,
+        "name": "Gluteus medius left",
+        "color": [
+          242,
+          109,
+          143
+        ]
+      },
+      {
+        "value": 43,
+        "name": "Gluteus medius right",
+        "color": [
+          67,
+          163,
+          242
+        ]
+      },
+      {
+        "value": 44,
+        "name": "Gluteus minimus left",
+        "color": [
+          207,
+          242,
+          24
+        ]
+      },
+      {
+        "value": 45,
+        "name": "Gluteus minimus right",
+        "color": [
+          225,
+          109,
+          242
+        ]
+      },
+      {
+        "value": 46,
+        "name": "Autochthon left",
+        "color": [
+          67,
+          242,
+          168
+        ]
+      },
+      {
+        "value": 47,
+        "name": "Autochthon right",
+        "color": [
+          242,
+          86,
+          24
+        ]
+      },
+      {
+        "value": 48,
+        "name": "Iliopsoas left",
+        "color": [
+          109,
+          110,
+          242
+        ]
+      },
+      {
+        "value": 49,
+        "name": "Iliopsoas right",
+        "color": [
+          119,
+          242,
+          67
+        ]
+      },
+      {
+        "value": 50,
+        "name": "Brain",
+        "color": [
+          242,
+          24,
+          153
+        ]
+      }
+    ]
+  },
+  "contract": {
+    "kind": "job",
+    "version": 1,
+    "dialect": "seg"
+  },
+  "runtime": {
+    "type": "container",
+    "image": "ghcr.io/imagin4care/seg-agent-totalsegmentator-mr:2.18.0-fast",
+    "port": 8000,
+    "gpu": {
+      "memoryGb": 16
+    },
+    "timeouts": {
+      "startS": 300,
+      "runS": 600,
+      "idleS": 60
+    },
+    "maxSessions": 1,
+    "models": [
+      {
+        "name": "TotalSegmentator total_mr, 3 mm",
+        "sizeGb": 0.13
+      }
+    ]
+  },
+  "legal": {
+    "license": {
+      "code": "Apache-2.0",
+      "weights": "Apache-2.0",
+      "url": "https://github.com/wasserth/TotalSegmentator"
+    },
+    "commercialUse": "yes",
+    "intendedUse": "Research on anatomical segmentation. Research use only, not a medical device.",
+    "limitations": "Trained on adult images; the fast model is coarser than the full one. Other tasks of TotalSegmentator need a licence and are not included.",
+    "citation": "Wasserthal J. et al., TotalSegmentator: Robust Segmentation of 104 Anatomic Structures in CT Images, Radiology: AI, 2023; Akinci D'Antonoli T. et al., TotalSegmentator MRI, Radiology, 2025.",
+    "homepage": "https://github.com/wasserth/TotalSegmentator"
+  }
+}

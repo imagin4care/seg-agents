@@ -1,0 +1,27 @@
+{
+  "manifest": "seg-agent/1",
+  "name": "slip",
+  "title": "SLIP",
+  "version": "1.0.0",
+  "summary": "Interactive 3D segmentation of any structure from a few clicks.",
+  "description": "Click inside a structure to segment it in 3D; click outside to remove what does not belong. An image larger than 512 voxels on a side is worked on at a reduced resolution.",
+  "author": "IRCAD (Podvin et al.)",
+  "purpose": { "category": "general", "detail": "Any structure in CT or MR, refined click by click." },
+  "mode": "interactive",
+  "accepts": { "image": { "modalities": ["CT", "MR"], "anatomy": ["any"], "maxVoxels": 268435456 }, "prompts": ["point"], "labels": true },
+  "returns": { "kind": "mask" },
+  "contract": { "kind": "session", "version": 1, "dialect": "seg" },
+  "runtime": {
+    "type": "container", "image": "ghcr.io/imagin4care/seg-agent-slip:1.0.0", "port": 8000, "gpu": { "memoryGb": 16, "cuda": ["13.0"] },
+    "timeouts": { "startS": 300, "runS": 120, "idleS": 60 }, "maxSessions": 1,
+    "models": [{ "name": "SLIP_ckpt.pth", "sizeGb": 0.3 }]
+  },
+  "legal": {
+    "license": { "code": "GPL-3.0-only", "weights": "not stated", "url": "https://github.com/IRCAD/SLIP" },
+    "commercialUse": "unknown",
+    "intendedUse": "Research on interactive segmentation. Research use only, not a medical device.",
+    "limitations": "Point prompts only. One user at a time: the model holds one image.",
+    "citation": "Podvin et al., SLIP, arXiv:2607.22332, 2026.",
+    "homepage": "https://github.com/IRCAD/SLIP"
+  }
+}

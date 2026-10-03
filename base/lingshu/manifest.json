@@ -1,0 +1,26 @@
+{
+  "manifest": "seg-agent/1",
+  "name": "lingshu",
+  "title": "Lingshu",
+  "version": "1.0.0",
+  "summary": "An open medical vision-language model: describes what a few slices of the image show.",
+  "description": "Lingshu-7B, served by vLLM on the platform's own GPU: the slices leave for no third party. It takes a few minutes to start, so it suits several questions in a row more than one.",
+  "author": "Alibaba DAMO Academy (Lingshu), imagin4care (agent)",
+  "purpose": { "category": "interpretation", "detail": "A description of rendered slices of a medical image, in plain words." },
+  "mode": "interpretation",
+  "accepts": { "image": { "modalities": ["any"], "anatomy": ["any"] }, "prompts": ["text"] },
+  "returns": { "kind": "text" },
+  "contract": { "kind": "chat", "version": 1, "dialect": "seg" },
+  "runtime": {
+    "type": "container", "image": "ghcr.io/imagin4care/seg-agent-lingshu:1.0.0", "port": 8000, "gpu": { "memoryGb": 24 }, "diskGb": 40,
+    "timeouts": { "startS": 900, "runS": 180, "idleS": 120 }, "maxSessions": 4,
+    "models": [{ "name": "Lingshu-7B", "sizeGb": 16.6 }]
+  },
+  "legal": {
+    "license": { "code": "MIT", "weights": "MIT", "url": "https://huggingface.co/lingshu-medical-mllm/Lingshu-7B" },
+    "commercialUse": "yes",
+    "intendedUse": "A general description of an image for teaching and research. Research use only, not a medical device, not a diagnosis.",
+    "limitations": "Sees a few rendered slices, not the volume. Can be wrong with confidence. Not evaluated here on any task.",
+    "homepage": "https://huggingface.co/lingshu-medical-mllm/Lingshu-7B"
+  }
+}

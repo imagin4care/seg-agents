@@ -1,0 +1,36 @@
+# Builds the image of the agent and pushes it to this repository's own
+# registry (ghcr.io), under the version its manifest says. Run it from the
+# Actions tab ("Run workflow"), or push a tag: v1.0.0.
+name: Build the agent's image
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' manifest.json | head -n 1)
+          image="ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]'):$version"
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build -t "$image" .
+          docker push "$image"
+          {
+            echo "### The image of version $version"
+            echo
+            echo "\`$image\`"
+            echo
+            echo "Paste it as the image of the agent, with version $version, on the platform (AI agents › New agent)."
+            echo "The package is private until you make it public (github.com › your profile › Packages):"
+            echo "for a private one, connect ghcr.io on the platform first (AI agents › Private images)."
+          } >> "$GITHUB_STEP_SUMMARY"

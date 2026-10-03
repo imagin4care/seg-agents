@@ -1,0 +1,22 @@
+{
+  "manifest": "seg-agent/1",
+  "name": "my-agent",
+  "title": "My agent",
+  "version": "1.0.0",
+  "summary": "Grows a region from each click through voxels of about the same intensity.",
+  "author": "Your name",
+  "purpose": { "category": "general", "detail": "An example to start from." },
+  "mode": "interactive",
+  "accepts": { "image": { "modalities": ["any"], "anatomy": ["any"] }, "prompts": ["point"], "labels": true },
+  "returns": { "kind": "mask" },
+  "contract": { "kind": "session", "version": 1, "dialect": "seg" },
+  "runtime": {
+    "type": "container", "image": "ghcr.io/your-name/my-agent:1.0.0", "port": 8000, "gpu": null,
+    "timeouts": { "startS": 120, "runS": 60, "idleS": 60 }, "maxSessions": 2
+  },
+  "legal": {
+    "license": { "code": "MIT", "weights": "none" },
+    "commercialUse": "yes",
+    "intendedUse": "Research use only, not a medical device."
+  }
+}
