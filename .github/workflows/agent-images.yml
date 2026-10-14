@@ -1,8 +1,10 @@
 # Build the image of one base agent (base/) and push it to the GitHub
 # Container Registry, as ghcr.io/<owner>/seg-agent-<agent>:<commit>.
 #
-# Run by hand only ("Run workflow", choosing the agent). It deploys nothing and
-# changes no server. What it leaves:
+# Run by hand ("Run workflow", choosing the agent), or by pushing a tag that
+# names the agent (`git tag build/<agent> && git push origin build/<agent>`,
+# for who has git at hand and no browser). It deploys nothing and changes no
+# server. What it leaves:
 #   - the image, in this repository's packages. A new package may be private:
 #     a base agent's must be public for RunPod to pull it (Package settings →
 #     Change visibility, once per package; GitHub cannot make it private
@@ -24,6 +26,8 @@ on:
         description: "For slip only: the server image it builds on (ghcr.io/imagin4care/slip-server:<commit>)"
         required: false
         default: ''
+  push:
+    tags: ['build/*']
 
 permissions:
   contents: read
@@ -31,7 +35,7 @@ permissions:
 
 # One build of an agent at a time; builds of different agents run side by side.
 concurrency:
-  group: agent-images-${{ inputs.agent }}
+  group: agent-images-${{ inputs.agent || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -68,12 +72,14 @@ jobs:
 
       # Which Dockerfile, with which build arguments, and the image's name. A
       # tag names the commit it was built from; what is registered is the digest.
+      # The agent chosen, or the one the tag names.
       - name: What to build
         id: plan
         env:
           AGENT: ${{ inputs.agent }}
           SLIP_IMAGE: ${{ inputs.slip_image }}
         run: |
+          AGENT="${AGENT:-${GITHUB_REF_NAME#build/}}"
           repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/seg-agent-$AGENT"
           image="$repository:${GITHUB_SHA::12}"
           case "$AGENT" in
@@ -91,6 +97,7 @@ jobs:
             *) echo "::error::No such base agent: $AGENT"; exit 1 ;;
           esac
           {
+            echo "agent=$AGENT"
             echo "repository=$repository"
             echo "image=$image"
             echo "file=$file"
@@ -123,7 +130,7 @@ jobs:
       # NV-Reason-CT's file of its sources), or kept beside SLIP's sources.
       - name: Take its manifest out
         env:
-          AGENT: ${{ inputs.agent }}
+          AGENT: ${{ steps.plan.outputs.agent }}
           FILE: ${{ steps.plan.outputs.file }}
           ARGS: ${{ steps.plan.outputs.args }}
         run: |
@@ -142,19 +149,19 @@ jobs:
 
       - name: Pin it to the digest
         env:
-          AGENT: ${{ inputs.agent }}
+          AGENT: ${{ steps.plan.outputs.agent }}
           REPOSITORY: ${{ steps.plan.outputs.repository }}
           DIGEST: ${{ steps.push.outputs.digest }}
         run: node base/pin-manifest.mjs out/manifest.json "$REPOSITORY" "$DIGEST" > "out/$AGENT.json"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: manifest-${{ inputs.agent }}
-          path: out/${{ inputs.agent }}.json
+          name: manifest-${{ steps.plan.outputs.agent }}
+          path: out/${{ steps.plan.outputs.agent }}.json
 
       - name: Say what was made
         env:
-          AGENT: ${{ inputs.agent }}
+          AGENT: ${{ steps.plan.outputs.agent }}
           IMAGE: ${{ steps.plan.outputs.image }}
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
