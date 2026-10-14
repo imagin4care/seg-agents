@@ -9,8 +9,9 @@ code behind the kit (`../kit/seg_agent_kit.py`), a Dockerfile, and a manifest.
 |---|---|---|---|
 | `monai/` | MONAI's whole-body CT model (bundle `wholeBody_ct_segmentation` 0.2.7, its 3 mm model), automatic, 104 structures, for a GPU worker or a CPU one (`DEVICE`) | `python:3.11-slim`, MONAI and torch at the versions the bundle was made with, the bundle baked in | Built for a CPU and run on a synthetic CT on a developer's machine (`docs/superpowers/verification/2026-10-agent-marketplace-monai/`). Built for a GPU by the workflow and published as `ghcr.io/imagin4care/seg-agent-monai-wholebody-ct@sha256:61c9d02e…71b0` (public), registered in `gateway/agents/monai-wholebody-ct.json`. **Never run on a GPU or on RunPod.** |
 | `slip/` | SLIP, interactive, point prompts | the image production runs (`ghcr.io/imagin4care/slip-server:<commit>`), with `bridge/agent.py` in front of its server | Written; the bridge is tested against a stand-in for SLIP's server. **The image was never built or run.** |
-| `totalsegmentator/` | TotalSegmentator, automatic, one task per image (`total` for CT, `total_mr` for MR), fast model, for a GPU worker or a CPU one (`DEVICE`) | `python:3.11-slim`, TotalSegmentator from PyPI, weights baked in | Built for a CPU and run on the sample head on a developer's machine (see `docs/superpowers/verification/2026-10-agent-marketplace-slice-4/`). **Never run on a GPU or on RunPod.** |
+| `totalsegmentator/` | TotalSegmentator, automatic, one task per image (`total` for CT, `total_mr` for MR), fast model, for a GPU worker or a CPU one (`DEVICE`) | `python:3.11-slim`, TotalSegmentator from PyPI, weights baked in | Built for a CPU and run on the sample head on a developer's machine (see `docs/superpowers/verification/2026-10-agent-marketplace-slice-4/`). Built for a GPU by the workflow, both tasks, and published as `ghcr.io/imagin4care/seg-agent-totalsegmentator-ct@sha256:2223987a…c71c` and `…-mr@sha256:cacba268…1c0d` (public), registered in `gateway/agents/`. **Never run on a GPU or on RunPod.** |
 | `lingshu/` | Lingshu-7B, a medical vision-language model (MIT), answering questions about rendered slices; served by vLLM in the same container | `vllm/vllm-openai:<tag>`, the model's weights baked in (17 GB; an image of some 25 GB) | Written; its agent is tested against a stand-in for vLLM. **The image was never built or run**: it needs a 24 GB GPU. |
+| `nv-reason-ct/` | NV-Reason-CT 0.1 (NVIDIA, OpenMDW-1.1), a 3D vision-language model of CT: reads a whole chest or abdominal CT and writes a report, its reasoning apart, or answers a question, then follow-ups (an interpretation agent on the `job` contract) | `python:3.11-slim`, torch 2.9.1 for CUDA 12.8 and the model's pinned requirements, its checkpoint baked in as six layers (an image of some 18 GB) | Written; its text router and the split of its checkpoint are tested (`test_base.py`). **The image was never built or run**: it needs a 24 GB GPU, and is built by the workflow only. |
 | `bridge/` | Not an agent of its own: the kit in front of any server that speaks nnInteractive's click protocol | — | Tested (`test_base.py`). |
 
 nnInteractive itself is not a base agent on a paid site: its weights are CC
@@ -22,11 +23,44 @@ An automatic agent is sent the image in the units of its modality:
 Hounsfield units for a CT (the app applies the series' rescale,
 `apps/demo/src/agents/agentImage.ts`).
 
+## NV-Reason-CT
+
+`nv-reason-ct/` serves NVIDIA's NV-Reason-CT
+(`huggingface.co/nvidia/NV-Reason-CT`, revision `386b93e`) behind the kit as
+an agent that reads the whole volume and answers in words: its question
+comes after its image, and its text is read as it is written. The browser
+sends the CT resampled to 2 mm (`accepts.image.spacing`); the agent writes it
+as NIfTI and hands it to the model's own processor, which crops 192³ voxels
+around the chest or the abdomen (the `region` parameter). With `reasoning`
+on, what the model writes before `</think>` is sent as its reasoning, apart
+from the answer (`thinking.py`). Follow-up questions come with the earlier
+turns as text, and the image is read again.
+
+- **Licence.** OpenMDW-1.1, code and weights: commercial use and
+  redistribution allowed, keeping the licence and notices. The image carries
+  the model's `LICENSE` and card beside its weights, in `/opt/model`.
+- **GPU.** 24 GB (10.6 GB of BF16 weights and 13,824 vision tokens; NVIDIA's
+  own demo runs on a 24 GB A10G), CUDA 12.8 or later on the host; one job at
+  a time.
+- **Built** by the workflow only (Actions → Agent images → `nv-reason-ct`),
+  never on a developer's machine: the build downloads the checkpoint, holds
+  it twice beside torch (some 50 GB of disk at its peak; the workflow moves
+  Docker to the runner's second disk), and pushes an image of some 18 GB.
+  Its manifest is `nv-reason-ct/manifest.json`, as SLIP's is a file of its
+  sources; the stage `manifest` of its Dockerfile holds it alone for the
+  workflow, which pins it to the digest.
+- **Weights in six layers.** The checkpoint is one 10.6 GB
+  `model.safetensors`, and GitHub's registry refuses a layer over 10 GB:
+  `shard.py` splits it while the image is built into six files of about
+  1.8 GB, each tensor whole, with the index transformers reads
+  (`model.safetensors.index.json`), and each file is copied in a layer of its
+  own.
+
 ## Tests
 
 ```bash
 cd apps/demo/deploy/agents
-python -m unittest discover -s base     # the bridge, the geometry, MONAI's manifest; no model needed
+python -m unittest discover -s base     # the bridge, the geometry, MONAI's manifest, NV-Reason-CT's text router and checkpoint split; no model needed
 ```
 
 ## Building and publishing one

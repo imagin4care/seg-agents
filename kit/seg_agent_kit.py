@@ -36,6 +36,19 @@ An agent that answers in words (contract "chat", version 1):
 
     serve(interpret=interpret)
 
+An agent that reads the whole volume and answers in words (contract "job",
+version 1, its manifest returning "text"): its question comes after its
+image, and what it writes is read as it is written.
+
+    from seg_agent_kit import serve
+
+    def read(image, job):                # job.question, job.history, job.geometry, job.parameters
+        for piece in model_output():
+            job.reason(piece)            # or job.answer(piece); job.cancelled() to stop early
+        # nothing to return: what was written is the answer
+
+    serve(job=read)
+
 What it takes care of: the token check, `/ping`, `/manifest`, uploads in
 pieces (`/_relay`), one session per `x-agent-session`, jobs run in the
 background and asked about meanwhile, the limits on what a caller may send,
@@ -81,6 +94,14 @@ _HEADER_BYTES = 4096
 _MESSAGE_CHARS = 200
 # An answer in words: the platform reads no longer one.
 _ANSWER_CHARS = 20_000
+# What a job that answers in words may write, in characters (code points):
+# the platform keeps no more of either.
+_TEXT_LIMITS = {"answer": 40_000, "reasoning": 60_000}
+# The question of such a job, and the conversation it is part of.
+_QUESTION_CHARS = 4000
+_MAX_QUESTION_BYTES = 256 * 1024
+# How long such a job waits for its question once it has its image.
+_QUESTION_WAIT_S = 60
 _PROMPTS = {
     "/add_point_interaction": "point",
     "/add_bbox_interaction": "bbox",
@@ -370,7 +391,13 @@ class Job:
     it was asked with, `progress(fraction, message)` to say how far it is
     (in one short line), and `cancelled()` to learn that nobody waits for the
     result any more. A handler that never looks at `cancelled()` runs to its
-    end for nobody: look at it between two steps of the work."""
+    end for nobody: look at it between two steps of the work.
+
+    A job that answers in words is also given its `question` and the
+    conversation it is part of (`history`: the earlier turns, each
+    `{"role": "user" | "assistant", "text": ...}`), and writes with
+    `answer(piece)` and `reason(piece)`: what it wrote so far is read while it
+    writes. Past the limits the platform keeps, the rest is left out."""
 
     def __init__(self, geometry, parameters):
         self.geometry = geometry
@@ -379,7 +406,13 @@ class Job:
         self.fraction = 0.0
         self.message = ""
         self.result = None
+        self.question = None
+        self.history = []
         self._cancel = threading.Event()
+        self._asked = threading.Event()
+        self._text_lock = threading.Lock()
+        self._pieces = {part: [] for part in _TEXT_LIMITS}
+        self._lengths = dict.fromkeys(_TEXT_LIMITS, 0)
 
     def progress(self, fraction, message=""):
         self.fraction = max(0.0, min(1.0, float(fraction)))
@@ -388,23 +421,68 @@ class Job:
     def cancelled(self):
         return self._cancel.is_set()
 
+    def answer(self, piece):
+        """More of the answer."""
+        self._write("answer", piece)
+
+    def reason(self, piece):
+        """More of the reasoning that leads to the answer, kept apart from it."""
+        self._write("reasoning", piece)
+
+    def _write(self, part, piece):
+        with self._text_lock:
+            piece = str(piece)[:max(0, _TEXT_LIMITS[part] - self._lengths[part])]
+            if piece:
+                self._pieces[part].append(piece)
+                self._lengths[part] += len(piece)
+
+    def written(self, part, since=0):
+        """What was written of `part` from character `since` on, and its whole length."""
+        with self._text_lock:
+            text = "".join(self._pieces[part])
+        return text[max(0, min(since, len(text))):], len(text)
+
     def over(self):
         """Nobody will ask for its result: it failed, or was told to stop."""
         return self.state in ("failed", "cancelled") or self.cancelled()
 
 
-class _Jobs:
-    """The jobs of one worker, and the calls of the job contract on them."""
+def _offsets(query):
+    """Where the caller's reading of each part of a text stopped: `answer=<n>&reasoning=<m>`."""
+    said = dict(pair.partition("=")[::2] for pair in query.split("&") if pair)
+    return {part: int(said[part]) if said.get(part, "").isdigit() else 0 for part in _TEXT_LIMITS}
 
-    def __init__(self, run, max_jobs):
+
+def _question_of(body):
+    """The question of a job that answers in words, and its conversation; None when the body is not one."""
+    try:
+        asked = json.loads(body)
+        question, history = asked["question"], asked.get("history", [])
+    except (ValueError, TypeError, KeyError):
+        return None
+    if not isinstance(question, str) or not question.strip() or len(question) > _QUESTION_CHARS or not isinstance(history, list):
+        return None
+    if not all(isinstance(t, dict) and t.get("role") in ("user", "assistant") and isinstance(t.get("text"), str) for t in history):
+        return None
+    return question, [{"role": t["role"], "text": t["text"]} for t in history]
+
+
+class _Jobs:
+    """The jobs of one worker, and the calls of the job contract on them.
+    `text`: the jobs answer in words (the manifest returns "text"), and wait
+    for their question."""
+
+    def __init__(self, run, max_jobs, text=False):
         self.run = run
         self.max_jobs = max_jobs
+        self.text = text
         self.jobs = {}  # job id -> Job, the oldest first
         self.lock = threading.Lock()
 
-    def call(self, method, path, content_type, body, spec):
+    def call(self, method, path, content_type, body, spec, query=""):
         """One call of the job contract. `spec`: what the job is asked with
-        (the `x-agent-job` header). Returns (status, content type, body)."""
+        (the `x-agent-job` header); `query`: the request's query string.
+        Returns (status, content type, body)."""
         parts = path.strip("/").split("/")[1:]
         if method == "POST" and not parts:
             return self._start(content_type, body, spec)
@@ -414,8 +492,14 @@ class _Jobs:
             raise _Answer(404, "no-job")
         if method == "GET" and len(parts) == 1:
             said = {"state": job.state, "progress": job.fraction, "message": job.message}
+            if self.text:
+                # What was written since the caller last read, and how long it is now.
+                for part, since in _offsets(query).items():
+                    said[part], said[f"{part}Length"] = job.written(part, since)
             return 200, "application/json", json.dumps(said).encode("utf8")
-        if method == "GET" and parts[1:] == ["result"]:
+        if method == "POST" and parts[1:] == ["question"] and self.text:
+            return self._ask(job, body)
+        if method == "GET" and parts[1:] == ["result"] and not self.text:
             if job.state != "succeeded":
                 raise _Answer(409, "not-done")
             # Given once: a label map is not kept for nobody.
@@ -446,16 +530,51 @@ class _Jobs:
         threading.Thread(target=self._work, args=(job, image), daemon=True).start()
         return 202, "application/json", json.dumps({"id": job_id}).encode("utf8")
 
+    @staticmethod
+    def _ask(job, body):
+        """The question of a job that answers in words: once, and the job starts on it."""
+        if len(body) > _MAX_QUESTION_BYTES:
+            raise _Answer(413, "question-too-large")
+        if job._asked.is_set():
+            raise _Answer(409, "question-given")
+        asked = _question_of(body)
+        if asked is None:
+            raise _Answer(400, "bad-question", f"a question of 1 to {_QUESTION_CHARS} characters, and a history of turns")
+        job.question, job.history = asked
+        job._asked.set()
+        return 200, "application/json", b"{}"
+
+    @staticmethod
+    def _questioned(job):
+        """Waits for the question of a job that answers in words. False when
+        none came in time, or the job was cancelled meanwhile (its state then says which)."""
+        deadline = time.monotonic() + _QUESTION_WAIT_S
+        while not job._asked.wait(0.05):
+            if job.cancelled():
+                job.state = "cancelled"
+                return False
+            if time.monotonic() >= deadline:
+                job.message = "no question came"
+                job.state = "failed"
+                return False
+        return True
+
     def _work(self, job, image):
+        if self.text and not self._questioned(job):
+            return
         job.state = "running"
         try:
             labels = self.run(image, job)
             if job.cancelled():
                 job.state = "cancelled"
                 return
-            if not isinstance(labels, LabelMap) or labels.shape != image.shape:
+            if self.text:
+                if not job.written("answer")[1]:
+                    raise ValueError("the agent wrote no answer")
+            elif not isinstance(labels, LabelMap) or labels.shape != image.shape:
                 raise ValueError("the agent must return a LabelMap of the shape of the image")
-            job.result = labels.encoded()
+            else:
+                job.result = labels.encoded()
             job.fraction = 1.0
             job.state = "succeeded"
         except ImageRefused as e:
@@ -502,10 +621,11 @@ class _Worker:
         self.ready = threading.Event()
         places = manifest.get("runtime", {}).get("maxSessions", 1)
         self.sessions = _Sessions(session_class, places) if session_class else None
-        self.jobs = _Jobs(job, places) if job else None
+        # A job whose manifest returns text answers in words.
+        self.jobs = _Jobs(job, places, text=manifest.get("returns", {}).get("kind") == "text") if job else None
         self.interpret = interpret
 
-    def call(self, method, path, session_id, content_type, body, spec):
+    def call(self, method, path, session_id, content_type, body, spec, query=""):
         """One call, whether it came whole or through the relay.
         Returns (status, content type, body)."""
         if not session_id:
@@ -517,7 +637,7 @@ class _Worker:
         if path == "/jobs" or path.startswith("/jobs/"):
             if self.jobs is None:
                 raise _Answer(404, "not-found")
-            return self.jobs.call(method, path, content_type, body, spec)
+            return self.jobs.call(method, path, content_type, body, spec, query)
         if self.sessions is None:
             raise _Answer(404, "not-found")
         return self.sessions.call(method, path, session_id, content_type, body)
@@ -563,7 +683,7 @@ def _handler(agent, token):
             return None
 
         def _serve(self):
-            path = self.path.split("?")[0]
+            path, _, query = self.path.partition("?")
             # The health check of RunPod's load balancer: no token, and says
             # nothing about any session.
             if path == "/ping" and self.command == "GET":
@@ -592,7 +712,7 @@ def _handler(agent, token):
                             raise _Answer(400, "bad-relay-path")
                         return self._send(*agent.call("POST", path, session_id, content_type, whole, spec))
                     raise _Answer(404, "not-found")
-                return self._send(*agent.call(self.command, path, session_id, content_type, body, spec))
+                return self._send(*agent.call(self.command, path, session_id, content_type, body, spec, query))
             except _Answer as answer:
                 return self._send(answer.status, "application/json", answer.body)
             except (KeyError, ValueError, TypeError) as e:

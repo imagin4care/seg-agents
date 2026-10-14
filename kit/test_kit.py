@@ -16,7 +16,7 @@ import sys
 import time
 import unittest
 
-from seg_agent_kit import LabelMap, Mask, Volume, _Jobs, _Sessions
+from seg_agent_kit import LabelMap, Mask, Volume, _Answer, _Jobs, _Sessions
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FAKES = os.path.join(HERE, "..", "fakes")
@@ -444,3 +444,135 @@ class EncodingTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def asked(question, history=None):
+    """The question of a job that answers in words, as the platform posts it."""
+    return json.dumps({"question": question, "history": history or []}), "application/json"
+
+
+def status_of(jobs, *call):
+    """The status a call of the job contract is answered with, as the server would send it."""
+    try:
+        return jobs.call(*call)[0]
+    except _Answer as answer:
+        return answer.status
+
+
+class TextJobTest(unittest.TestCase):
+    """A job that answers in words: its question comes after its image, and its
+    text is read as it is written, from where the last reading stopped."""
+
+    def jobs(self, run, max_jobs=2):
+        return _Jobs(run, max_jobs, text=True)
+
+    @staticmethod
+    def start(jobs, spec=""):
+        content_type, body = form(volume_npy((1, 2, 3)))[::-1]
+        status, _, started = jobs.call("POST", "/jobs", content_type, body, spec)
+        assert status == 202
+        return json.loads(started)["id"]
+
+    @staticmethod
+    def said(jobs, job_id, answer=0, reasoning=0):
+        status, _, body = jobs.call("GET", f"/jobs/{job_id}", "", b"", "", f"answer={answer}&reasoning={reasoning}")
+        assert status == 200
+        return json.loads(body)
+
+    def until(self, jobs, job_id, states):
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            said = self.said(jobs, job_id)
+            if said["state"] in states:
+                return said
+            time.sleep(0.01)
+        raise AssertionError(f"the job is still {said['state']}")
+
+    def test_the_handler_starts_once_the_question_is_there_and_is_given_it(self):
+        seen = []
+
+        def read(image, job):
+            seen.append((image.shape, job.question, job.history, job.parameters))
+            job.reason("Looked. ")
+            job.answer("Nothing abnormal.")
+
+        jobs = self.jobs(read)
+        job_id = self.start(jobs, job_spec({"region": "chest"})["x-agent-job"])
+        time.sleep(0.05)
+        self.assertEqual((self.said(jobs, job_id)["state"], seen), ("queued", []))
+        history = [{"role": "user", "text": "Report?"}, {"role": "assistant", "text": "Normal."}]
+        self.assertEqual(jobs.call("POST", f"/jobs/{job_id}/question", "application/json", asked("And the heart?", history)[0].encode(), "")[0], 200)
+        said = self.until(jobs, job_id, ("succeeded",))
+        self.assertEqual(seen, [((1, 2, 3), "And the heart?", history, {"region": "chest"})])
+        self.assertEqual((said["answer"], said["reasoning"], said["answerLength"], said["reasoningLength"]),
+                         ("Nothing abnormal.", "Looked. ", 17, 8))
+        # From where the last reading stopped.
+        later = self.said(jobs, job_id, answer=8, reasoning=8)
+        self.assertEqual((later["answer"], later["reasoning"]), ("abnormal.", ""))
+        # A text job gives its words through its status, not a label map.
+        self.assertEqual(status_of(jobs, "GET", f"/jobs/{job_id}/result", "", b"", ""), 404)
+
+    def test_a_question_is_asked_once_and_must_be_one(self):
+        jobs = self.jobs(lambda image, job: job.answer("ok"))
+        job_id = self.start(jobs)
+        post = lambda body: status_of(jobs, "POST", f"/jobs/{job_id}/question", "application/json", body, "")
+        self.assertEqual(post(b"not json"), 400)
+        self.assertEqual(post(json.dumps({"question": ""}).encode()), 400)
+        self.assertEqual(post(json.dumps({"question": "x" * 4001}).encode()), 400)
+        self.assertEqual(post(json.dumps({"question": "Report?", "history": [{"role": "doctor", "text": "hi"}]}).encode()), 400)
+        self.assertEqual(post(json.dumps(["Report?"]).encode()), 400)
+        self.assertEqual(post(json.dumps({"question": "Report?", "history": [], "pad": "x" * (256 * 1024)}).encode()), 413)
+        self.assertEqual(post(asked("Report?")[0].encode()), 200)
+        self.assertEqual(post(asked("Again?")[0].encode()), 409)
+        self.until(jobs, job_id, ("succeeded",))
+
+    def test_a_job_whose_question_does_not_come_fails_and_one_cancelled_while_waiting_ends(self):
+        import seg_agent_kit
+        waited = seg_agent_kit._QUESTION_WAIT_S
+        seg_agent_kit._QUESTION_WAIT_S = 0.2
+        self.addCleanup(setattr, seg_agent_kit, "_QUESTION_WAIT_S", waited)
+        jobs = self.jobs(lambda image, job: job.answer("never"))
+        job_id = self.start(jobs)
+        self.assertEqual(self.until(jobs, job_id, ("failed",))["message"], "no question came")
+        waiting = self.start(jobs)
+        jobs.call("POST", f"/jobs/{waiting}/cancel", "", b"", "")
+        self.until(jobs, waiting, ("cancelled",))
+
+    def test_a_long_answer_is_cut_and_an_empty_one_is_a_failure(self):
+        def long(image, job):
+            for _ in range(50):
+                job.answer("x" * 1000)
+            job.reason("y" * 70_000)
+
+        jobs = self.jobs(long)
+        job_id = self.start(jobs)
+        jobs.call("POST", f"/jobs/{job_id}/question", "application/json", asked("Report?")[0].encode(), "")
+        said = self.until(jobs, job_id, ("succeeded",))
+        self.assertEqual((said["answerLength"], said["reasoningLength"]), (40_000, 60_000))
+
+        jobs = self.jobs(lambda image, job: job.reason("thought, and said nothing"))
+        job_id = self.start(jobs)
+        jobs.call("POST", f"/jobs/{job_id}/question", "application/json", asked("Report?")[0].encode(), "")
+        self.assertIn("the agent wrote no answer", self.until(jobs, job_id, ("failed",))["message"])
+
+    def test_the_fake_reporter_writes_its_report_in_pieces_that_add_up(self):
+        agent = Agent("reporter", env={"REPORTER_PAUSE_S": "0.005"})
+        self.addCleanup(agent.stop)
+        manifest = json.loads(agent.call("GET", "/manifest")[1])
+        self.assertEqual((manifest["mode"], manifest["contract"]["kind"], manifest["returns"]["kind"]), ("interpretation", "job", "text"))
+        status, started = agent.call("POST", "/jobs", *form(volume_npy((2, 3, 4))), headers=job_spec({"region": "abdomen"}))
+        self.assertEqual(status, 202)
+        job_id = json.loads(started)["id"]
+        # Letters outside the basic plane count as one character on both sides.
+        question = "Is there air under the diaphragm? é🫁x"
+        self.assertEqual(agent.call("POST", f"/jobs/{job_id}/question", *asked(question))[0], 200)
+        answer, reasoning, state = "", "", "queued"
+        deadline = time.time() + 10
+        while state not in ("succeeded", "failed") and time.time() < deadline:
+            said = json.loads(agent.call("GET", f"/jobs/{job_id}?answer={len(answer)}&reasoning={len(reasoning)}")[1])
+            answer, reasoning, state = answer + said["answer"], reasoning + said["reasoning"], said["state"]
+        whole = json.loads(agent.call("GET", f"/jobs/{job_id}?answer=0&reasoning=0")[1])
+        self.assertEqual((state, answer, reasoning), ("succeeded", whole["answer"], whole["reasoning"]))
+        self.assertIn(f"You asked: {question}", answer)
+        self.assertIn("abdomen", answer)
+        self.assertIn("2×3×4 voxels", reasoning)

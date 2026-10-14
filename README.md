@@ -21,6 +21,7 @@ written and tested; changes are made there.
 | `monai-wholebody-ct` | `ghcr.io/imagin4care/seg-agent-monai-wholebody-ct` | MONAI Model Zoo, `wholeBody_ct_segmentation` 0.2.7, 3 mm model: 104 structures of a CT | Apache-2.0 |
 | `totalsegmentator-ct`, `totalsegmentator-mr` | `ghcr.io/imagin4care/seg-agent-totalsegmentator-ct`, `…-mr` | TotalSegmentator 2.18.0, tasks `total` and `total_mr`, fast models | Apache-2.0 |
 | `slip` | `ghcr.io/imagin4care/seg-agent-slip` | SLIP (IRCAD) | Code GPL-3.0; the weights' licence is not stated |
+| `nv-reason-ct` | `ghcr.io/imagin4care/seg-agent-nv-reason-ct` | NVIDIA NV-Reason-CT 0.1 (revision `386b93e`): reports, reasoning and answers about a chest or abdominal CT, read as a volume; weights baked in six layers | OpenMDW-1.1 |
 
 Research use only: none of them is a medical device.
 

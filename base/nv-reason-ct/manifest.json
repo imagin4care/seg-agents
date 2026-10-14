@@ -1,0 +1,55 @@
+{
+  "manifest": "seg-agent/1",
+  "name": "nv-reason-ct",
+  "title": "NV-Reason-CT",
+  "version": "0.1.0",
+  "summary": "Reads a chest or abdominal CT and writes a structured report, a reasoning analysis, or the answer to a question about it.",
+  "description": "NVIDIA's NV-Reason-CT, a vision-language model of CT, run in the platform's own container on a GPU rented from RunPod: the scan goes to that worker and nowhere else, and no model API sees it. It reads the scan as a volume, not as slices: its 3D vision encoder sees the scan at 2 mm, cropped to a cube of 192 voxels (38 cm) around the chest or the abdomen, as the Region setting says, and a Qwen3.5-4B language model writes. Ask for a structured report, a reasoning analysis, or a question about a finding, then follow-up questions on the same scan: each reads the scan again with the conversation so far. With its reasoning shown, it reasons step by step before it answers, and the reasoning is kept apart from the answer: it is model output, not proof of how the model decided. It takes a minute or more to start, and a few minutes to write a report with its reasoning. A model's reading for research and teaching, not a diagnosis: check every finding against the images.",
+  "author": "NVIDIA (NV-Reason-CT); imagin4care (agent)",
+  "purpose": { "category": "interpretation", "detail": "Reports, reasoning and answers to questions about a chest or abdominal CT, read as a whole volume." },
+  "mode": "interpretation",
+  "accepts": {
+    "image": { "modalities": ["CT"], "anatomy": ["chest", "abdomen"], "spacing": 2 },
+    "prompts": ["text"],
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "region": {
+          "type": "string", "title": "Region", "description": "Where the model looks: it crops 38 cm around the chest or the abdomen.",
+          "enum": ["chest", "abdomen"], "default": "chest"
+        },
+        "reasoning": {
+          "type": "boolean", "title": "Show its reasoning", "description": "The model reasons step by step before answering: slower, and shown apart.",
+          "default": true
+        },
+        "maxTokens": {
+          "type": "integer", "title": "Longest answer (tokens)", "description": "The reasoning and the answer share them: an answer that runs out is cut short.",
+          "minimum": 256, "maximum": 4096, "default": 4096
+        }
+      }
+    },
+    "examples": [
+      { "title": "Structured chest report", "question": "Write a structured chest CT report.", "parameters": { "region": "chest" } },
+      { "title": "Structured abdominal report", "question": "Write a structured abdominal CT report.", "parameters": { "region": "abdomen" } },
+      { "title": "Chest reasoning", "question": "Provide a full reasoning analysis of this chest CT.", "parameters": { "region": "chest" } },
+      { "title": "Abdominal reasoning", "question": "Provide a full reasoning analysis of this abdominal CT.", "parameters": { "region": "abdomen" } },
+      { "title": "Pleural effusion?", "question": "Is a pleural effusion present in this CT?", "parameters": { "region": "chest" } }
+    ]
+  },
+  "returns": { "kind": "text", "reasoning": true },
+  "contract": { "kind": "job", "version": 1, "dialect": "seg" },
+  "runtime": {
+    "type": "container", "image": "ghcr.io/imagin4care/seg-agent-nv-reason-ct:0.1.0", "port": 8000,
+    "gpu": { "memoryGb": 24, "cuda": ["12.8", "12.9", "13.0", "13.1", "13.2"] }, "diskGb": 40,
+    "timeouts": { "startS": 600, "runS": 600, "idleS": 120 }, "maxSessions": 1, "env": {}, "secrets": [],
+    "models": [{ "name": "NV-Reason-CT 0.1 (BF16, revision 386b93e)", "sizeGb": 10.6 }]
+  },
+  "legal": {
+    "license": { "code": "OpenMDW-1.1", "weights": "OpenMDW-1.1", "url": "https://huggingface.co/nvidia/NV-Reason-CT" },
+    "commercialUse": "yes",
+    "intendedUse": "Research and teaching: chest and abdominal CT report drafts, questions and reviewable reasoning. Research use only, not a medical device, not a diagnosis; every output is reviewed by a qualified professional.",
+    "limitations": "Chest and abdomen only, cropped by a lung-HU heuristic that can miss on unusual scans. Sees a 192³ crop at 2 mm: small findings can be missed. Its reasoning is model output, not proof of how it decided. Can be wrong with confidence.",
+    "citation": "NV-Reason-CT: 3D Visual Language Model for CT Analysis, arXiv:2609.27511, 2026.",
+    "homepage": "https://github.com/NVIDIA-Medtech/NV-Reason-CT"
+  }
+}

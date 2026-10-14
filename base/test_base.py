@@ -1,8 +1,9 @@
 """Tests of the base agents, as far as they go without a model: the bridge in
 front of a server that speaks the click protocol (a stand-in for SLIP's), the
 geometry the agents reading NIfTI hand to their model, the manifest of the
-MONAI agent made from a bundle's metadata, and the open model's agent in
-front of a stand-in for vLLM.
+MONAI agent made from a bundle's metadata, the open model's agent in front of
+a stand-in for vLLM, and NV-Reason-CT's text router and the split of its
+checkpoint.
 
     python -m unittest discover -s base     (from apps/demo/deploy/agents)
 """
@@ -259,6 +260,87 @@ class ManifestTest(unittest.TestCase):
         self.assertNotEqual(colour(1), colour(2))
         self.assertEqual([on_gpu["runtime"]["gpu"], on_cpu["runtime"]["gpu"]], [{"memoryGb": 16}, None])
         self.assertEqual(on_gpu["runtime"]["image"], "ghcr.io/org/seg-agent-monai-wholebody-ct:abc")
+
+
+class ReasoningTextTest(unittest.TestCase):
+    """NV-Reason-CT's text, sent as it arrives: its reasoning before `</think>`, its answer after."""
+
+    thinking = module(os.path.join(HERE, "nv-reason-ct", "thinking.py"))
+
+    def route(self, pieces, thinking=True):
+        """What was written of each part, piece by piece, and the router once the text is over."""
+        written = {"reasoning": [], "answer": []}
+        router = self.thinking.Router(thinking, written["reasoning"].append, written["answer"].append)
+        for piece in pieces:
+            router.feed(piece)
+        router.close()
+        return written, router
+
+    def test_a_tag_cut_across_two_pieces_is_found_and_only_what_could_start_it_is_held_back(self):
+        written = {"reasoning": [], "answer": []}
+        router = self.thinking.Router(True, written["reasoning"].append, written["answer"].append)
+        router.feed("The lungs are clear.\n</th")
+        # What is surely reasoning is written at once; "</th" waits for the next piece.
+        self.assertEqual(written, {"reasoning": ["The lungs are clear.\n"], "answer": []})
+        router.feed("ink>\n\nFindings: none.")
+        router.close()
+        self.assertEqual(written, {"reasoning": ["The lungs are clear.\n"], "answer": ["Findings: none."]})
+        self.assertFalse(router.in_reasoning)
+
+    def test_without_reasoning_everything_is_the_answer_and_an_empty_block_is_dropped(self):
+        written, router = self.route(["Findings:", " no effusion. 3 < 4"], thinking=False)
+        self.assertEqual(written, {"reasoning": [], "answer": ["Findings:", " no effusion. 3 < 4"]})
+        self.assertFalse(router.in_reasoning)
+        written, _ = self.route(["<think>\n\n</th", "ink>\n\nNo effusion."], thinking=False)
+        self.assertEqual(written, {"reasoning": [], "answer": ["No effusion."]})
+
+    def test_a_leading_think_tag_is_dropped_even_in_pieces(self):
+        written, _ = self.route(["\n<th", "ink>\nLooking", " at the bases.</think>Small effusion."])
+        self.assertEqual(written, {"reasoning": ["Looking", " at the bases."], "answer": ["Small effusion."]})
+
+    def test_the_answer_starts_at_its_first_word_whatever_blank_lines_come_after_the_tag(self):
+        written, _ = self.route(["Reasoned.</think>", "\n\n", "  ", "\nImpression: normal.\n"])
+        self.assertEqual(written, {"reasoning": ["Reasoned."], "answer": ["Impression: normal.\n"]})
+
+    def test_a_text_that_ends_before_its_reasoning_did_says_so(self):
+        written, router = self.route(["Thinking about", " the liver </thi"])
+        # The pieces held back as a possible tag are reasoning after all.
+        self.assertEqual(written, {"reasoning": ["Thinking about", " the liver ", "</thi"], "answer": []})
+        self.assertTrue(router.in_reasoning)
+
+
+class CheckpointSplitTest(unittest.TestCase):
+    """NV-Reason-CT's checkpoint, split into six files, without torch."""
+
+    shard = module(os.path.join(HERE, "nv-reason-ct", "shard.py"))
+
+    def test_the_tensors_are_shared_among_six_files_whole_and_balanced_by_bytes(self):
+        sizes = {"embed": 1270, "lm_head": 1270, **{f"layer.{i}": 300 for i in range(30)}, "norm": 1}
+        files = self.shard.plan(sizes)
+        self.assertEqual(len(files), 6)
+        self.assertEqual(sorted(name for names in files for name in names), sorted(sizes))
+        weights = [sum(sizes[n] for n in names) for names in files]
+        self.assertLessEqual(max(weights) - min(weights), 300)
+        self.assertEqual(self.shard.shard_name(0), "model-00001-of-00006.safetensors")
+        with self.assertRaises(ValueError):
+            self.shard.plan({"a": 1, "b": 2})
+
+    def test_the_sizes_and_metadata_of_a_checkpoint_are_read_from_its_header(self):
+        header = {"__metadata__": {"format": "pt"}, "a": {"dtype": "BF16", "shape": [2, 3], "data_offsets": [0, 12]},
+                  "b": {"dtype": "F32", "shape": [4], "data_offsets": [12, 28]}}
+        raw = json.dumps(header).encode()
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "model.safetensors")
+            with open(path, "wb") as f:
+                f.write(len(raw).to_bytes(8, "little") + raw + bytes(28))
+            self.assertEqual(self.shard.table(path), ({"format": "pt"}, {"a": 12, "b": 16}))
+
+    def test_without_the_checkpoint_it_stops_and_says_why(self):
+        with tempfile.TemporaryDirectory() as folder:
+            done = subprocess.run([sys.executable, os.path.join(HERE, "nv-reason-ct", "shard.py"), folder, os.path.join(folder, "m"),
+                                   os.path.join(folder, "s")], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("no model.safetensors in", done.stderr)
 
 
 if __name__ == "__main__":
